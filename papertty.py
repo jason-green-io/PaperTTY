@@ -16,7 +16,14 @@ import drivers.drivers_partial as drivers_partial
 import drivers.drivers_full as drivers_full
 import drivers.drivers_color as drivers_color
 import drivers.drivers_colordraw as drivers_colordraw
-
+# for the process thread
+import threading
+# for command parsing
+import shlex
+# for terminal emulation
+import pyte
+# for psuedo tty
+import pty
 # for ioctl
 import fcntl
 # for validating type of and access to device files
@@ -37,6 +44,15 @@ import click
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 # for tidy driver list
 from collections import OrderedDict
+# for logging
+import logging
+# select
+import select
+# to run the process and hoockup it's stdin nad out
+import subprocess
+
+logging.basicConfig(level=logging.DEBUG)
+
 
 
 class PaperTTY:
@@ -91,12 +107,18 @@ class PaperTTY:
         # dirty trick to get "maximum height"
         fh = font.getsize('hg')[1]
         # get descent value
-        descent = font.getmetrics()[1] if truetype else 0
+        metrics = font.getmetrics()
+        logging.info(metrics)
+        descent = metrics[1] if truetype else 0
         # the reported font size
         size = font.size if truetype else fh
         # Why descent/2? No idea, but it works "well enough" with
         # big and small sizes
-        return size - (descent / 2) + spacing
+        height = size - (descent / 2) + spacing  
+        
+        logging.info("fh %s descent %s size %s height %s", fh, descent, size, height)
+        
+        return 8
 
     @staticmethod
     def band(bb):
@@ -174,7 +196,7 @@ class PaperTTY:
         else:
             print("The font '{}' could not be found, using fallback font instead.".format(path))
             font = ImageFont.load_default()
-
+        print(font)
         return font
 
     def init_display(self):
@@ -200,6 +222,7 @@ class PaperTTY:
                               self.white)
             # create the Draw object and draw the text
             draw = ImageDraw.Draw(image)
+            
             draw.text((0, 0), text, font=self.font, fill=fill, spacing=spacing)
 
             # if we want a cursor, draw it - the most convoluted part
@@ -437,10 +460,134 @@ def terminal(settings, vcsa, font, fontsize, noclear, nocursor, sleep, ttyrows, 
                     time.sleep(float(sleep))
 
 
+@click.command()
+@click.option('--font', default=PaperTTY.defaultfont, help='Path to a TrueType or PIL font', show_default=True)
+@click.option('--size', 'fontsize', default=8, help='Font size', show_default=True)
+@click.option('--noclear', default=False, is_flag=True, help='Leave display content on exit')
+@click.option('--nocursor', default=False, is_flag=True, help="Don't draw the cursor")
+@click.option('--sleep', default=0.1, help='Minimum sleep between refreshes', show_default=True)
+@click.option('--rows', 'ttyrows', help='Set TTY rows (--cols required too)')
+@click.option('--cols', 'ttycols', help='Set TTY columns (--rows required too)')
+@click.option('--portrait', default=False, is_flag=True, help='Use portrait orientation', show_default=False)
+@click.option('--flipx', default=False, is_flag=True, help='Flip X axis (EXPERIMENTAL/BROKEN)', show_default=False)
+@click.option('--flipy', default=False, is_flag=True, help='Flip Y axis (EXPERIMENTAL/BROKEN)', show_default=False)
+@click.option('--spacing', default=0, help='Line spacing for the text', show_default=True)
+@click.option('--scrub', 'apply_scrub', is_flag=True, default=False, help='Apply scrub when starting up',
+              show_default=True)
+@click.option('--autofit', is_flag=True, default=False, help='Autofit terminal size to font size', show_default=True)
+@click.option('--command', 'command', default="bash", help="Command to run in pty", show_default=True)
+@click.pass_obj
+def ptycommand(settings, font, fontsize, noclear, nocursor, sleep, ttyrows, ttycols, portrait, flipx, flipy,
+             spacing, apply_scrub, autofit, command):
+    """Display command running from a pty on an e-Paper display, exit with Ctrl-C."""
+    settings.args['font'] = font
+    settings.args['fontsize'] = fontsize
+    ptty = settings.get_init_tty()
+
+    if apply_scrub:
+        ptty.driver.scrub()
+    oldbuff = ''
+    oldimage = None
+    oldcursor = None
+    # dirty - should refactor to make this cleaner
+    flags = {'scrub_requested': False}
+
+    # handle SIGINT from `systemctl stop` and Ctrl-C
+    def sigint_handler(sig, frame):
+        print("Exiting (SIGINT)...")
+        if not noclear:
+            ptty.showtext(oldbuff, fill=ptty.white, **textargs)
+            sys.exit(0)
+
+    # toggle scrub flag when SIGUSR1 received
+    def sigusr1_handler(sig, frame):
+        print("Scrubbing display (SIGUSR1)...")
+        flags['scrub_requested'] = True
+
+    signal.signal(signal.SIGINT, sigint_handler)
+    signal.signal(signal.SIGUSR1, sigusr1_handler)
+
+    # group the various params for readability
+    textargs = {'portrait': portrait, 'flipx': flipx, 'flipy': flipy, 'spacing': spacing}
+
+    if any([ttyrows, ttycols]) and not all([ttyrows, ttycols]):
+        ptty.error("You must define both --rows and --cols to change terminal size.")
+
+    if all([ttyrows, ttycols]):
+        print("row and col specified, using {} {}".format(ttyrows, ttycols))
+
+    else:
+        # if size not specified manually, see if autofit was requested
+        if autofit:
+            max_dim = ptty.fit(portrait, spacing)
+            print("Automatic resize of TTY to {} rows, {} columns".format(max_dim[1], max_dim[0]))
+            #ptty.set_tty_size(ptty.ttydev(vcsa), max_dim[1], max_dim[0])
+            ttycols, ttyrows = max_dim
+
+    screen = pyte.Screen(ttycols, ttyrows)
+    stream = pyte.ByteStream(screen)
+
+    master_fd, slave_fd = pty.openpty()
+    argv = shlex.split(command)
+
+
+    def process():
+        logging.info("Starting thread and running %s", command)
+        # os.execvpe(argv[0], argv,
+        env = dict(LC_ALL="en_GB.UTF-8", TERM="linux", COLUMNS=str(ttycols), LINES=str(ttyrows))
+        subprocess.Popen(argv, env=env, stdin=slave_fd, stdout=slave_fd )
+
+    threading.Thread(target=process).start()
+    winsize = struct.pack("HHHH", ttyrows, ttycols, 0, 0)
+    fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
+   
+
+
+    def writer(): 
+        print("Started displaying with minimum update interval {} s, exit with Ctrl-C".format(sleep))
+        while True:
+            # if SIGUSR1 toggled the scrub flag, scrub display and start with a fresh image
+            if flags['scrub_requested']:
+                ptty.driver.scrub()
+                # clear old image and buffer and restore flag
+                oldimage = None
+                oldbuff = ''
+                flags['scrub_requested'] = False
+            try:
+                [_master_fd], _wlist, _xlist = select.select([master_fd], [], [], 1)
+            except(ValueError):        # Nothing to read.
+                pass
+            else:
+                data = os.read(master_fd, 2048)
+                if not data:
+                    pass
+                else:
+                    stream.feed(data)
+    
+    threading.Thread(target=writer).start()
+
+    while True:
+        buff = ''.join([line + '\n' for line in screen.display])
+        # do something only if content has changed or cursor was moved
+        if buff != oldbuff: 
+            #or cursor != oldcursor:
+            # show new content
+            oldimage = ptty.showtext(buff, fill=ptty.black, cursor=None,
+                                     oldimage=oldimage,
+                                     **textargs)
+            oldbuff = buff
+            #oldcursor = cursor
+        else:
+            # delay before next update check
+            time.sleep(float(sleep))
+
+
+
 if __name__ == '__main__':
     # add all the CLI commands
     cli.add_command(scrub)
     cli.add_command(terminal)
+    cli.add_command(ptycommand)
     cli.add_command(stdin)
     cli.add_command(list_drivers)
     cli()
