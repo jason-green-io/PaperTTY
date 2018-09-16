@@ -85,7 +85,7 @@ class PaperTTY:
     @staticmethod
     def error(msg, code=1):
         """Print error and exit"""
-        print(msg)
+        logging.info(msg)
         sys.exit(code)
 
     @staticmethod
@@ -96,8 +96,8 @@ class PaperTTY:
             try:
                 fcntl.ioctl(tty.fileno(), termios.TIOCSWINSZ, size)
             except OSError:
-                print("TTY refused to resize (rows={}, cols={}), continuing anyway.".format(rows, cols))
-                print("Try setting a sane size manually.")
+                logging.info("TTY refused to resize (rows={}, cols={}), continuing anyway.".format(rows, cols))
+                logging.info("Try setting a sane size manually.")
 
     @staticmethod
     def font_height(font, spacing=0):
@@ -108,16 +108,13 @@ class PaperTTY:
         fh = font.getsize('hg')[1]
         # get descent value
         metrics = font.getmetrics()
-        logging.info(metrics)
         descent = metrics[1] if truetype else 0
         # the reported font size
         size = font.size if truetype else fh
         # Why descent/2? No idea, but it works "well enough" with
         # big and small sizes
         height = size - (descent / 2) + spacing  
-        
-        logging.info("fh %s descent %s size %s height %s", fh, descent, size, height)
-        
+        logging.info("truetype %s fh %s descent %s size %s height %s name %s", truetype, fh, descent, size, height, font.getname())
         return 8
 
     @staticmethod
@@ -166,17 +163,17 @@ class PaperTTY:
         vcsa_major, vcsa_minor = os.major(vs.st_rdev), os.minor(vs.st_rdev)
         tty_major, tty_minor = os.major(ts.st_rdev), os.minor(ts.st_rdev)
         if not (vcsa_major == vcsa_kernel_major and vcsa_minor in vcsa_range):
-            print("Not a valid vcsa device node: {} ({}/{})".format(vcsa, vcsa_major, vcsa_minor))
+            loggin.info("Not a valid vcsa device node: {} ({}/{})".format(vcsa, vcsa_major, vcsa_minor))
             return False
         read_vcsa = os.access(vcsa, os.R_OK)
         write_tty = os.access(tty, os.W_OK)
         if not read_vcsa:
-            print("No read access to {} - maybe run with sudo?".format(vcsa))
+            loggin.info("No read access to {} - maybe run with sudo?".format(vcsa))
             return False
         if not (tty_major == tty_kernel_major and tty_minor in tty_range):
-            print("Not a valid TTY device node: {}".format(vcsa))
+            loggin.info("Not a valid TTY device node: {}".format(vcsa))
         if not write_tty:
-            print("No write access to {} so cannot set terminal size, maybe run with sudo?".format(tty))
+            loggin.info("No write access to {} so cannot set terminal size, maybe run with sudo?".format(tty))
         return True
 
     def load_font(self, path, size):
@@ -194,9 +191,8 @@ class PaperTTY:
             except IOError:
                 self.error("Invalid font: '{}'".format(path))
         else:
-            print("The font '{}' could not be found, using fallback font instead.".format(path))
+            loggin.info("The font '{}' could not be found, using fallback font instead.".format(path))
             font = ImageFont.load_default()
-        print(font)
         return font
 
     def init_display(self):
@@ -395,14 +391,14 @@ def terminal(settings, vcsa, font, fontsize, noclear, nocursor, sleep, ttyrows, 
 
     # handle SIGINT from `systemctl stop` and Ctrl-C
     def sigint_handler(sig, frame):
-        print("Exiting (SIGINT)...")
+        logging.info("Exiting (SIGINT)...")
         if not noclear:
             ptty.showtext(oldbuff, fill=ptty.white, **textargs)
             sys.exit(0)
 
     # toggle scrub flag when SIGUSR1 received
     def sigusr1_handler(sig, frame):
-        print("Scrubbing display (SIGUSR1)...")
+        logging.info("Scrubbing display (SIGUSR1)...")
         flags['scrub_requested'] = True
 
     signal.signal(signal.SIGINT, sigint_handler)
@@ -420,9 +416,9 @@ def terminal(settings, vcsa, font, fontsize, noclear, nocursor, sleep, ttyrows, 
             # if size not specified manually, see if autofit was requested
             if autofit:
                 max_dim = ptty.fit(portrait, spacing)
-                print("Automatic resize of TTY to {} rows, {} columns".format(max_dim[1], max_dim[0]))
+                logging.info("Automatic resize of TTY to {} rows, {} columns".format(max_dim[1], max_dim[0]))
                 ptty.set_tty_size(ptty.ttydev(vcsa), max_dim[1], max_dim[0])
-        print("Started displaying {}, minimum update interval {} s, exit with Ctrl-C".format(vcsa, sleep))
+        logging.info("Started displaying {}, minimum update interval {} s, exit with Ctrl-C".format(vcsa, sleep))
         while True:
             # if SIGUSR1 toggled the scrub flag, scrub display and start with a fresh image
             if flags['scrub_requested']:
@@ -494,14 +490,14 @@ def ptycommand(settings, font, fontsize, noclear, nocursor, sleep, ttyrows, ttyc
 
     # handle SIGINT from `systemctl stop` and Ctrl-C
     def sigint_handler(sig, frame):
-        print("Exiting (SIGINT)...")
+        logging.info("Exiting (SIGINT)...")
         if not noclear:
             ptty.showtext(oldbuff, fill=ptty.white, **textargs)
             sys.exit(0)
 
     # toggle scrub flag when SIGUSR1 received
     def sigusr1_handler(sig, frame):
-        print("Scrubbing display (SIGUSR1)...")
+        logging.info("Scrubbing display (SIGUSR1)...")
         flags['scrub_requested'] = True
 
     signal.signal(signal.SIGINT, sigint_handler)
@@ -514,13 +510,13 @@ def ptycommand(settings, font, fontsize, noclear, nocursor, sleep, ttyrows, ttyc
         ptty.error("You must define both --rows and --cols to change terminal size.")
 
     if all([ttyrows, ttycols]):
-        print("row and col specified, using {} {}".format(ttyrows, ttycols))
+        logging.info("row and col specified, using {} {}".format(ttyrows, ttycols))
 
     else:
         # if size not specified manually, see if autofit was requested
         if autofit:
             max_dim = ptty.fit(portrait, spacing)
-            print("Automatic resize of TTY to {} rows, {} columns".format(max_dim[1], max_dim[0]))
+            logging.info("Automatic resize of TTY to {} rows, {} columns".format(max_dim[1], max_dim[0]))
             #ptty.set_tty_size(ptty.ttydev(vcsa), max_dim[1], max_dim[0])
             ttycols, ttyrows = max_dim
 
@@ -537,14 +533,18 @@ def ptycommand(settings, font, fontsize, noclear, nocursor, sleep, ttyrows, ttyc
         env = dict(LC_ALL="en_GB.UTF-8", TERM="linux", COLUMNS=str(ttycols), LINES=str(ttyrows))
         subprocess.Popen(argv, env=env, stdin=slave_fd, stdout=slave_fd )
 
-    threading.Thread(target=process).start()
+    processThread = threading.Thread(target=process)
+    processThread.daemon = True
+
+    processThread.start()
+
     winsize = struct.pack("HHHH", ttyrows, ttycols, 0, 0)
     fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
    
 
 
     def writer(): 
-        print("Started displaying with minimum update interval {} s, exit with Ctrl-C".format(sleep))
+        logging.info("Started displaying with minimum update interval {} s, exit with Ctrl-C".format(sleep))
         while True:
             # if SIGUSR1 toggled the scrub flag, scrub display and start with a fresh image
             if flags['scrub_requested']:
@@ -563,19 +563,23 @@ def ptycommand(settings, font, fontsize, noclear, nocursor, sleep, ttyrows, ttyc
                     pass
                 else:
                     stream.feed(data)
-    
-    threading.Thread(target=writer).start()
+ 
+    writerThread = threading.Thread(target=writer)
+    writerThread.daemon = True
+
+    writerThread.start()
 
     while True:
         buff = ''.join([line + '\n' for line in screen.display])
         # do something only if content has changed or cursor was moved
-        if buff != oldbuff: 
+        if screen.dirty: 
+            screen.dirty.clear()
+            logging.info("Buffer changed")
             #or cursor != oldcursor:
             # show new content
             oldimage = ptty.showtext(buff, fill=ptty.black, cursor=None,
                                      oldimage=oldimage,
                                      **textargs)
-            oldbuff = buff
             #oldcursor = cursor
         else:
             # delay before next update check
