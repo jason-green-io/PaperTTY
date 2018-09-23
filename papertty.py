@@ -22,8 +22,6 @@ import threading
 import shlex
 # for terminal emulation
 import pyte
-# for psuedo tty
-import pty
 # for ioctl
 import fcntl
 # for validating type of and access to device files
@@ -41,15 +39,13 @@ import time
 # for command line usage
 import click
 # for drawing
-from PIL import Image, ImageChops, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps
 # for tidy driver list
 from collections import OrderedDict
 # for logging
 import logging
-# select
-import select
-# to run the process and hoockup it's stdin nad out
-import subprocess
+# to run the process in a pty
+import ptyprocess
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -114,7 +110,7 @@ class PaperTTY:
         # Why descent/2? No idea, but it works "well enough" with
         # big and small sizes
         height = size - (descent / 2) + spacing  
-        logging.info("truetype %s fh %s descent %s size %s height %s name %s", truetype, fh, descent, size, height, font.getname())
+        # logging.info("truetype %s fh %s descent %s size %s height %s name %s", truetype, fh, descent, size, height, font.getname())
         return 8
 
     @staticmethod
@@ -209,7 +205,7 @@ class PaperTTY:
         ph = self.driver.height
         return int((pw if portrait else ph) / width), int((ph if portrait else pw) / height)
 
-    def showtext(self, text, fill, cursor=None, portrait=False, flipx=False, flipy=False, oldimage=None, spacing=0):
+    def showtext(self, text, fill, cursor=None, rotate180=False, portrait=False, flipx=False, flipy=False, oldimage=None, spacing=0):
         """Draw a string on the screen"""
         if self.ready():
             # set order of h, w according to orientation
@@ -218,7 +214,6 @@ class PaperTTY:
                               self.white)
             # create the Draw object and draw the text
             draw = ImageDraw.Draw(image)
-            
             draw.text((0, 0), text, font=self.font, fill=fill, spacing=spacing)
 
             # if we want a cursor, draw it - the most convoluted part
@@ -237,9 +232,15 @@ class PaperTTY:
                 start_y = (cur_y + 1) * height - 1 - spacing
                 # draw the cursor line
                 draw.line((start_x, start_y, start_x + cur_width, start_y), fill=self.black)
+            
             # rotate image if using landscape
             if not portrait:
-                image = image.rotate(90, expand=True)
+                image = image.transpose(Image.ROTATE_90)
+            if rotate180:
+                image = image.transpose(Image.ROTATE_180)
+                # stupid logical 128 pixel workaround, ugh
+                if self.driver.name == '2.13" BW':
+                    image = ImageChops.offset(image, -6, 0)
             # apply flips if desired
             if flipx:
                 image = image.transpose(Image.FLIP_LEFT_RIGHT)
@@ -523,28 +524,12 @@ def ptycommand(settings, font, fontsize, noclear, nocursor, sleep, ttyrows, ttyc
     screen = pyte.Screen(ttycols, ttyrows)
     stream = pyte.ByteStream(screen)
 
-    master_fd, slave_fd = pty.openpty()
     argv = shlex.split(command)
-
-
-    def process():
-        logging.info("Starting thread and running %s", command)
-        # os.execvpe(argv[0], argv,
-        env = dict(LC_ALL="en_GB.UTF-8", TERM="linux", COLUMNS=str(ttycols), LINES=str(ttyrows))
-        subprocess.Popen(argv, env=env, stdin=slave_fd, stdout=slave_fd )
-
-    processThread = threading.Thread(target=process)
-    processThread.daemon = True
-
-    processThread.start()
-
-    winsize = struct.pack("HHHH", ttyrows, ttycols, 0, 0)
-    fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
-   
-
 
     def writer(): 
         logging.info("Started displaying with minimum update interval {} s, exit with Ctrl-C".format(sleep))
+        p = ptyprocess.PtyProcess.spawn(argv, dimensions=(ttyrows, ttycols))
+
         while True:
             # if SIGUSR1 toggled the scrub flag, scrub display and start with a fresh image
             if flags['scrub_requested']:
@@ -553,12 +538,8 @@ def ptycommand(settings, font, fontsize, noclear, nocursor, sleep, ttyrows, ttyc
                 oldimage = None
                 oldbuff = ''
                 flags['scrub_requested'] = False
-            try:
-                [_master_fd], _wlist, _xlist = select.select([master_fd], [], [], 1)
-            except(ValueError):        # Nothing to read.
-                pass
             else:
-                data = os.read(master_fd, 2048)
+                data = p.read(4096)
                 if not data:
                     pass
                 else:
@@ -570,19 +551,20 @@ def ptycommand(settings, font, fontsize, noclear, nocursor, sleep, ttyrows, ttyc
     writerThread.start()
 
     while True:
-        buff = ''.join([line + '\n' for line in screen.display])
+        cursor = (int(screen.cursor.x), int(screen.cursor.y), ord(screen.cursor.attrs.data))
         # do something only if content has changed or cursor was moved
-        if screen.dirty: 
+        if screen.dirty or oldcursor != cursor: 
             screen.dirty.clear()
             logging.info("Buffer changed")
-            #or cursor != oldcursor:
+            
             # show new content
-            oldimage = ptty.showtext(buff, fill=ptty.black, cursor=None,
+            buff = '\n'.join(screen.display)
+            logging.info(cursor)
+            oldimage = ptty.showtext(buff, rotate180=True, fill=ptty.black, cursor=cursor,
                                      oldimage=oldimage,
                                      **textargs)
-            #oldcursor = cursor
+            oldcursor = cursor
         else:
-            # delay before next update check
             time.sleep(float(sleep))
 
 

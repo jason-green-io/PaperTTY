@@ -3,3 +3,4 @@ RPi.GPIO
 spidev
 click
 pyte
+ptyprocess
