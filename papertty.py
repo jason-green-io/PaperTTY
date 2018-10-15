@@ -41,7 +41,7 @@ import click
 # for drawing
 from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps
 # for tidy driver list
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 # for logging
 import logging
 # to run the process in a pty
@@ -205,7 +205,7 @@ class PaperTTY:
         ph = self.driver.height
         return int((pw if portrait else ph) / width), int((ph if portrait else pw) / height)
 
-    def showtext(self, text, fill, cursor=None, rotate180=False, portrait=False, flipx=False, flipy=False, oldimage=None, spacing=0):
+    def showtext(self, buff, fill, cursor=None, rotate180=False, portrait=False, flipx=False, flipy=False, oldimage=None, spacing=0, ttycols=0, ttyrows=0):
         """Draw a string on the screen"""
         if self.ready():
             # set order of h, w according to orientation
@@ -214,8 +214,23 @@ class PaperTTY:
                               self.white)
             # create the Draw object and draw the text
             draw = ImageDraw.Draw(image)
-            draw.text((0, 0), text, font=self.font, fill=fill, spacing=spacing)
+            
+            if type(buff) == defaultdict:
+                logging.info("Using a pyte screen buffer")
+                for row in range(0, ttyrows):
+                    for col in range(0, ttycols):
+                        char = buff[row][col]
+                        if char.reverse or char.bg != "default":
+                            draw.rectangle([(col * 4, row * 8),(col * 4 + 5, row * 8 + 7)], fill=self.black)
+                            draw.text((col * 4, row * 8), char.data, font=self.font, fill=self.white, spacing=spacing)
+                        else:
+                            draw.text((col * 4, row * 8), char.data, font=self.font, fill=fill, spacing=spacing)
 
+            # logging.info(cursor)
+                pass 
+            else:
+                draw.text((0, 0), buff, font=self.font, fill=fill, spacing=spacing)
+            
             # if we want a cursor, draw it - the most convoluted part
             if cursor:
                 cur_x, cur_y = cursor[0], cursor[1]
@@ -553,14 +568,10 @@ def ptycommand(settings, font, fontsize, noclear, nocursor, sleep, ttyrows, ttyc
     while True:
         cursor = (int(screen.cursor.x), int(screen.cursor.y), ord(screen.cursor.attrs.data))
         # do something only if content has changed or cursor was moved
-        if screen.dirty or oldcursor != cursor: 
+        if (screen.dirty or oldcursor != cursor) and not flags['scrub_requested']: 
             screen.dirty.clear()
-            logging.info("Buffer changed")
-            
-            # show new content
-            buff = '\n'.join(screen.display)
-            logging.info(cursor)
-            oldimage = ptty.showtext(buff, rotate180=True, fill=ptty.black, cursor=cursor,
+            # logging.info("Buffer changed")
+            oldimage = ptty.showtext(screen.buffer, ttycols=ttycols, ttyrows=ttyrows, rotate180=False, fill=ptty.black, cursor=cursor,
                                      oldimage=oldimage,
                                      **textargs)
             oldcursor = cursor
