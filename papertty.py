@@ -216,17 +216,6 @@ class PaperTTY:
             draw = ImageDraw.Draw(image)
             
             if type(buff) == defaultdict:
-<<<<<<< Updated upstream
-                logging.info("Using a pyte screen buffer")
-                for row in range(0, ttyrows):
-                    for col in range(0, ttycols):
-                        char = buff[row][col]
-                        if char.reverse or char.bg != "default":
-                            draw.rectangle([(col * 4, row * 8),(col * 4 + 5, row * 8 + 7)], fill=self.black)
-                            draw.text((col * 4, row * 8), char.data, font=self.font, fill=self.white, spacing=spacing)
-                        else:
-                            draw.text((col * 4, row * 8), char.data, font=self.font, fill=fill, spacing=spacing)
-=======
                 for row in range(0, ttyrows):
                     for col in range(0, ttycols):
                         fgfill=fill
@@ -242,7 +231,6 @@ class PaperTTY:
                         
 
                         draw.text((col * 4, row * 8), char.data, font=self.font, fill=fgfill, spacing=spacing)
->>>>>>> Stashed changes
 
             # logging.info(cursor)
                 pass 
