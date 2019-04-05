@@ -1,3 +1,5 @@
-cd /home/pi/PaperTTY+pyte/PaperTTY/
-/usr/bin/python3 /home/pi/PaperTTY+pyte/PaperTTY/papertty.py --driver epd2in13 ptycommand --command "tmux a -t tty" --autofit --scrub --font miniwi-fixed-8.bdf --spacing -1
+#!/bin/bash
+cd /home/pi/PaperTTY/
+
+exec /home/pi/PaperTTY/papertty.py --driver epd2in13 ptycommand --command "/usr/bin/tmux a -t tty" --autofit --scrub --font miniwi-redux.bdf --spacing 1
 

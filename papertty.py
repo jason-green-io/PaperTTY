@@ -216,6 +216,7 @@ class PaperTTY:
             draw = ImageDraw.Draw(image)
             
             if type(buff) == defaultdict:
+<<<<<<< Updated upstream
                 logging.info("Using a pyte screen buffer")
                 for row in range(0, ttyrows):
                     for col in range(0, ttycols):
@@ -225,6 +226,23 @@ class PaperTTY:
                             draw.text((col * 4, row * 8), char.data, font=self.font, fill=self.white, spacing=spacing)
                         else:
                             draw.text((col * 4, row * 8), char.data, font=self.font, fill=fill, spacing=spacing)
+=======
+                for row in range(0, ttyrows):
+                    for col in range(0, ttycols):
+                        fgfill=fill
+                        bgfill = self.white
+                        char = buff[row][col]
+                        if char.reverse or char.italics or char.bg != "default":
+                            bgfill = self.black
+                            fgfill = self.white
+                            draw.rectangle([(col * 4, row * 8),(col * 4 + 3, row * 8 + 7)], outline=bgfill, fill=bgfill)
+                        
+                        if char.underscore:
+                            draw.line([(col * 4, row * 8 + 7), (col * 4 + 4, row * 8 + 7)], fill=fgfill)
+                        
+
+                        draw.text((col * 4, row * 8), char.data, font=self.font, fill=fgfill, spacing=spacing)
+>>>>>>> Stashed changes
 
             # logging.info(cursor)
                 pass 
@@ -571,7 +589,7 @@ def ptycommand(settings, font, fontsize, noclear, nocursor, sleep, ttyrows, ttyc
         if (screen.dirty or oldcursor != cursor) and not flags['scrub_requested']: 
             screen.dirty.clear()
             # logging.info("Buffer changed")
-            oldimage = ptty.showtext(screen.buffer, ttycols=ttycols, ttyrows=ttyrows, rotate180=False, fill=ptty.black, cursor=cursor,
+            oldimage = ptty.showtext(screen.buffer, ttycols=ttycols, ttyrows=ttyrows, rotate180=True, fill=ptty.black, cursor=cursor,
                                      oldimage=oldimage,
                                      **textargs)
             oldcursor = cursor
