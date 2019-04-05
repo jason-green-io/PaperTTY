@@ -1,6 +1,6 @@
 # PaperTTY + changes from Jason Green
 
-- comes with a cool font based on [winiwi by joshua.net](http://josuah.net/git/miniwi/) that includes additions for compact QR codes in the termnial using a custom Unicode range (EE00-EEFF)
+- comes with a cool font based on [miniwi by joshua.net](http://josuah.net/git/miniwi/) that includes additions for compact QR codes in the termnial using a custom Unicode range (EE00-EEFF) (see: [qrunicode.py](https://gist.github.com/jason-green-io/ed2dc763aed74756d1abd2135fe55d8c))
 - implements a pty for better character encoding (Unicode)
 - attributes (reverse and underline .. I think I have colour showing as reverse as well)
 - example `go.sh` script with an example of how I roll
